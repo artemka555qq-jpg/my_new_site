@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Рекорды — {{ 'Сапёр' if game == 'minesweeper' else '2048' }}{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">
+    🏆 Рекорды:
+    {% if game == 'minesweeper' %}Сапёр{% else %}2048{% endif %}
+</h1>
+
+<div class="mb-4">
+    <a href="{{ url_for('leaderboard', game='minesweeper') }}"
+       class="btn {{ 'btn-primary' if game == 'minesweeper' else 'btn-outline-primary' }} btn-sm">💣 Сапёр</a>
+    <a href="{{ url_for('leaderboard', game='2048') }}"
+       class="btn {{ 'btn-primary' if game == '2048' else 'btn-outline-primary' }} btn-sm">🔢 2048</a>
+</div>
+
+{% if rows %}
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th style="width: 80px;">Место</th>
+                    <th>Игрок</th>
+                    <th>{% if game == 'minesweeper' %}Время (с){% else %}Очки{% endif %}</th>
+                    <th>Дата</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                    <td>
+                        {% if loop.index == 1 %}🥇
+                        {% elif loop.index == 2 %}🥈
+                        {% elif loop.index == 3 %}🥉
+                        {% else %}{{ loop.index }}{% endif %}
+                    </td>
+                    <td>
+                        {% if r['username'] %}
+                            <a href="{{ url_for('profile', username=r['username']) }}">
+                                {{ r['username'] }}
+                            </a>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td><strong>
+                        {% if game == 'minesweeper' %}
+                            {{ r['score'] }} с
+                        {% else %}
+                            {{ r['score'] }}
+                        {% endif %}
+                    </strong></td>
+                    <td class="text-muted small">{{ r['created_at'] }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% else %}
+    <div class="alert alert-info">
+        Пока никто не установил рекорд в этой игре.
+        {% if current_user.is_authenticated %}
+            <a href="{{ url_for('minesweeper' if game == 'minesweeper' else 'game2048') }}">
+                Будьте первым!
+            </a>
+        {% else %}
+            <a href="{{ url_for('login') }}">Войдите</a>, чтобы попробовать.
+        {% endif %}
+    </div>
+{% endif %}
+
+<div class="mt-4">
+    <a href="{{ url_for('games') }}" class="btn btn-outline-secondary">← Все игры</a>
+</div>
+{% endblock %}

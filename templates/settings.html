@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Настройки профиля</h1>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5>Профиль</h5>
+                <form method="post">
+                    <input type="hidden" name="form_type" value="profile">
+
+                    <div class="mb-3">
+                        <label class="form-label">Логин</label>
+                        <input type="text" class="form-control" value="{{ user['username'] }}" disabled>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" name="email" class="form-control"
+                               value="{{ user['email'] }}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">О себе</label>
+                        <textarea name="bio" rows="3" class="form-control"
+                                  maxlength="500"
+                                  placeholder="Пара слов о себе">{{ user['bio'] or '' }}</textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5>Сменить пароль</h5>
+                <form method="post">
+                    <input type="hidden" name="form_type" value="password">
+
+                    <div class="mb-3">
+                        <label class="form-label">Текущий пароль</label>
+                        <input type="password" name="old_password" class="form-control" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Новый пароль</label>
+                        <input type="password" name="new_password" class="form-control"
+                               required minlength="6">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Повторите новый пароль</label>
+                        <input type="password" name="new_password2" class="form-control"
+                               required minlength="6">
+                    </div>
+
+                    <button type="submit" class="btn btn-warning">Сменить пароль</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

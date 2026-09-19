@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block title %}Крестики-нолики{% endblock %}
+
+{% block head_extra %}
+<style>
+    .ttt-board {
+        display: grid;
+        grid-template-columns: repeat(3, 100px);
+        grid-template-rows: repeat(3, 100px);
+        gap: 6px;
+        margin: 20px auto;
+        width: fit-content;
+    }
+    .ttt-cell {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 3rem;
+        font-weight: bold;
+        background: #f0f0f0;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background 0.15s;
+        color: #212529;
+    }
+    .ttt-cell:hover:not(.taken) { background: #e0e0e0; }
+    .ttt-cell.taken { cursor: default; }
+    .ttt-cell.win {
+        background: #4caf50 !important;
+        color: white;
+        animation: pulse 0.5s ease infinite alternate;
+    }
+    @keyframes pulse {
+        from { transform: scale(1); }
+        to   { transform: scale(1.08); }
+    }
+    [data-bs-theme="dark"] .ttt-cell {
+        background: #3a3f45;
+        color: #fff;
+    }
+    [data-bs-theme="dark"] .ttt-cell:hover:not(.taken) { background: #4a4f55; }
+    .ttt-status {
+        font-size: 1.3rem;
+        font-weight: 600;
+        text-align: center;
+        padding: 12px;
+        border-radius: 8px;
+        background: rgba(0,0,0,0.05);
+        max-width: 400px;
+        margin: 0 auto;
+    }
+    [data-bs-theme="dark"] .ttt-status { background: rgba(255,255,255,0.05); }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="text-center mb-3">⭕❌ Крестики-нолики</h1>
+
+<p class="text-center text-muted">
+    Вы играете за <strong>❌</strong>. Бот играет за <strong>⭕</strong>.
+</p>
+
+<div class="mb-3">
+    <label class="me-2">Сложность бота:</label>
+    <select id="tttLevel" class="form-select d-inline-block" style="width:auto;">
+        <option value="easy">Лёгкий (случайно)</option>
+        <option value="medium">Средний</option>
+        <option value="hard" selected>Непобедимый</option>
+    </select>
+</div>
+
+<div id="ttt-status" class="ttt-status mb-3">Ваш ход</div>
+
+<div id="ttt-board" class="ttt-board"></div>
+
+<div class="text-center mt-3">
+    <button id="ttt-restart" class="btn btn-primary">🔄 Заново</button>
+    <a href="{{ url_for('games') }}" class="btn btn-outline-secondary">← Все игры</a>
+</div>
+
+<div class="row text-center mt-5">
+    <div class="col-md-4 mb-3">
+        <div class="p-3 border rounded">
+            <strong>Победы</strong>
+            <div class="display-6" id="tttWins">0</div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="p-3 border rounded">
+            <strong>Поражения</strong>
+            <div class="display-6" id="tttLosses">0</div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="p-3 border rounded">
+            <strong>Ничьи</strong>
+            <div class="display-6" id="tttDraws">0</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let board9, tttOver, stats;
+
+    const tttBoard  = document.getElementById('ttt-board');
+    const tttStatus = document.getElementById('ttt-status');
+    const levelSel  = document.getElementById('tttLevel');
+
+    const winsEl   = document.getElementById('tttWins');
+    const lossesEl = document.getElementById('tttLosses');
+    const drawsEl  = document.getElementById('tttDraws');
+
+    // Загружаем статистику из localStorage
+    try {
+        stats = JSON.parse(localStorage.getItem('ttt-stats')) || { wins: 0, losses: 0, draws: 0 };
+    } catch (e) {
+        stats = { wins: 0, losses: 0, draws: 0 };
+    }
+    updateStatsUI();
+
+    function updateStatsUI() {
+        winsEl.textContent   = stats.wins;
+        lossesEl.textContent = stats.losses;
+        drawsEl.textContent  = stats.draws;
+    }
+
+    function saveStats() {
+        localStorage.setItem('ttt-stats', JSON.stringify(stats));
+    }
+
+    function initTTT() {
+        board9 = Array(9).fill('');
+        tttOver = false;
+        tttStatus.textContent = 'Ваш ход';
+        tttStatus.className = 'ttt-status mb-3';
+        renderTTT();
+    }
+
+    function renderTTT() {
+        tttBoard.innerHTML = '';
+        for (let i = 0; i < 9; i++) {
+            const btn = document.createElement('button');
+            btn.className = 'ttt-cell' + (board9[i] ? ' taken' : '');
+            btn.textContent = board9[i];
+            btn.addEventListener('click', () => playerMove(i));
+            tttBoard.appendChild(btn);
+        }
+    }
+
+    function playerMove(i) {
+        if (tttOver || board9[i]) return;
+        board9[i] = '❌';
+        renderTTT();
+
+        const w = checkWinnerTTT('❌');
+        if (w) return endTTT('win', 'Вы победили! 🎉', w);
+        if (board9.every(c => c)) return endTTT('draw', 'Ничья 🤝');
+
+        tttStatus.textContent = 'Ход бота...';
+        setTimeout(botMove, 400);
+    }
+
+    function botMove() {
+        if (tttOver) return;
+        const level = levelSel.value;
+        const empty = board9.map((v, i) => v ? null : i).filter(v => v !== null);
+
+        let move;
+
+        if (level === 'easy') {
+            move = empty[Math.floor(Math.random() * empty.length)];
+        } else if (level === 'medium') {
+            move = mediumMove(empty);
+        } else {
+            move = bestMove(empty);
+        }
+
+        board9[move] = '⭕';
+        renderTTT();
+
+        const w = checkWinnerTTT('⭕');
+        if (w) return endTTT('loss', 'Бот победил 🤖', w);
+        if (board9.every(c => c)) return endTTT('draw', 'Ничья 🤝');
+
+        tttStatus.textContent = 'Ваш ход';
+    }
+
+    function mediumMove(empty) {
+        // 50% умный ход, 50% случайный
+        if (Math.random() < 0.5) return empty[Math.floor(Math.random() * empty.length)];
+        return bestMove(empty);
+    }
+
+    function bestMove(empty) {
+        // 1. Победить, если можно
+        for (const i of empty) {
+            board9[i] = '⭕';
+            if (checkWinnerTTT('⭕', false)) { board9[i] = ''; return i; }
+            board9[i] = '';
+        }
+        // 2. Заблокировать
+        for (const i of empty) {
+            board9[i] = '❌';
+            if (checkWinnerTTT('❌', false)) { board9[i] = ''; return i; }
+            board9[i] = '';
+        }
+        // 3. Минимакс
+        return minimax(empty);
+    }
+
+    function minimax(empty) {
+        // Полный перебор — игра всегда 3x3, дерево маленькое
+        let bestScore = -Infinity;
+        let bestMoves = [];
+
+        for (const i of empty) {
+            board9[i] = '⭕';
+            const score = minimaxScore('❌', 0);
+            board9[i] = '';
+            if (score > bestScore) {
+                bestScore = score;
+                bestMoves = [i];
+            } else if (score === bestScore) {
+                bestMoves.push(i);
+            }
+        }
+        return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    }
+
+    function minimaxScore(turn, depth) {
+        if (checkWinnerTTT('⭕', false)) return 10 - depth;
+        if (checkWinnerTTT('❌', false)) return depth - 10;
+        const empty = board9.map((v, i) => v ? null : i).filter(v => v !== null);
+        if (!empty.length) return 0;
+
+        if (turn === '⭕') {
+            let best = -Infinity;
+            for (const i of empty) {
+                board9[i] = '⭕';
+                best = Math.max(best, minimaxScore('❌', depth + 1));
+                board9[i] = '';
+            }
+            return best;
+        } else {
+            let best = Infinity;
+            for (const i of empty) {
+                board9[i] = '❌';
+                best = Math.min(best, minimaxScore('⭕', depth + 1));
+                board9[i] = '';
+            }
+            return best;
+        }
+    }
+
+    function checkWinnerTTT(p, highlight = true) {
+        const lines = [
+            [0,1,2],[3,4,5],[6,7,8],
+            [0,3,6],[1,4,7],[2,5,8],
+            [0,4,8],[2,4,6]
+        ];
+        for (const [a,b,c] of lines) {
+            if (board9[a] === p && board9[b] === p && board9[c] === p) {
+                if (highlight) {
+                    [a, b, c].forEach(i => tttBoard.children[i]?.classList.add('win'));
+                }
+                return [a, b, c];
+            }
+        }
+        return null;
+    }
+
+    function endTTT(kind, msg, winIdx) {
+        tttOver = true;
+        tttStatus.textContent = msg;
+        tttStatus.className = 'ttt-status mb-3 ' +
+            (kind === 'win' ? 'bg-success text-white'
+             : kind === 'loss' ? 'bg-danger text-white'
+             : 'bg-secondary text-white');
+
+        if (winIdx) {
+            setTimeout(() => {
+                winIdx.forEach(i => tttBoard.children[i]?.classList.add('win'));
+            }, 50);
+        }
+
+        if (kind === 'win')    stats.wins++;
+        if (kind === 'loss')   stats.losses++;
+        if (kind === 'draw')   stats.draws++;
+        saveStats();
+        updateStatsUI();
+    }
+
+    document.getElementById('ttt-restart').addEventListener('click', initTTT);
+    levelSel.addEventListener('change', initTTT);
+
+    initTTT();
+</script>
+{% endblock %}
