@@ -1,42 +1,68 @@
 import os
-from datetime import datetime
+import secrets
 from functools import wraps
 
 from flask import (
-    Flask, render_template, request, redirect, url_for, flash, abort, jsonify
+    Flask, render_template, request, redirect,
+    url_for, flash, abort
 )
 from flask_login import (
     LoginManager, UserMixin, login_user, logout_user,
     login_required, current_user
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from sqlalchemy import desc, or_
 
-import models
+from models import db, User, Game, Review, Message
 
+# ---------- Конфиг ----------
 app = Flask(__name__)
-app.secret_key = "change-me-to-a-long-random-string"
+app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+DEBUG = os.environ.get("FLASK_DEBUG", "0") == "1"
 
+# Папка для загрузки обложек
+UPLOAD_FOLDER = os.path.join("static", "uploads")
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB
 
-# ---------- Login Manager ----------
+# БД: PostgreSQL на Render, SQLite локально
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+else:
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///site.db"
+
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db.init_app(app)
+
+# ---------- Flask-Login ----------
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
-login_manager.login_message = "Войдите, чтобы продолжить"
-login_manager.login_message_category = "error"
 
 
-class User(UserMixin):
-    def __init__(self, row):
-        self.id = str(row["id"])
-        self.username = row["username"]
-        self.email = row["email"]
-        self.bio = row["bio"] if "bio" in row.keys() else ""
-        self.is_admin = bool(row["is_admin"])
+class CurrentUser(UserMixin):
+    def __init__(self, u):
+        self.id = str(u.id)
+        self.username = u.username
+        self.is_admin = u.is_admin
 
 
 @login_manager.user_loader
 def load_user(user_id):
-    row = models.get_user_by_id(int(user_id))
-    return User(row) if row else None
+    u = User.query.get(int(user_id))
+    return CurrentUser(u) if u else None
+
+
+# ---------- Утилиты ----------
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def admin_required(f):
@@ -48,128 +74,169 @@ def admin_required(f):
     return wrapper
 
 
-def human_date(date_str):
-    try:
-        dt = datetime.strptime(date_str, "%d.%m.%Y %H:%M")
-    except Exception:
-        return date_str
-    sec = (datetime.now() - dt).total_seconds()
-    if sec < 60:
-        return "только что"
-    if sec < 3600:
-        return f"{int(sec // 60)} мин назад"
-    if sec < 86400:
-        return f"{int(sec // 3600)} ч назад"
-    if sec < 604800:
-        return f"{int(sec // 86400)} дн назад"
-    return date_str
-
-
-app.jinja_env.filters["human_date"] = human_date
-
-
-# ---------- Главная ----------
+# ---------- Публичные страницы ----------
 @app.route("/")
 def index():
-    return render_template("index.html")
+    q = request.args.get("q", "").strip()
+    genre = request.args.get("genre", "").strip()
+    platform = request.args.get("platform", "").strip()
+
+    query = Game.query
+    if q:
+        query = query.filter(Game.title.ilike(f"%{q}%"))
+    if genre:
+        query = query.filter(Game.genre == genre)
+    if platform:
+        query = query.filter(Game.platform == platform)
+
+    games = query.order_by(desc(Game.id)).all()
+
+    # Списки для фильтров
+    all_genres = [g[0] for g in db.session.query(Game.genre).distinct().all()]
+    all_platforms = [p[0] for p in db.session.query(Game.platform).distinct().all()]
+
+    return render_template(
+        "index.html",
+        games=[g.to_dict() for g in games],
+        genres=sorted(all_genres),
+        platforms=sorted(all_platforms),
+        q=q, selected_genre=genre, selected_platform=platform,
+    )
 
 
-# ---------- Игры ----------
-@app.route("/games")
-def games():
-    return render_template("games.html")
-
-
-@app.route("/games/minesweeper")
-def minesweeper():
-    return render_template("minesweeper.html")
-
-
-@app.route("/games/2048")
-def game2048():
-    return render_template("game2048.html")
-
-
-@app.route("/games/tic-tac-toe")
-def tictactoe():
-    return render_template("tictactoe.html")
-
-
-# ---------- Рекорды ----------
-@app.route("/api/score", methods=["POST"])
-def api_score():
-    """Сохраняет результат игры. Вызывается из JS."""
-    if not current_user.is_authenticated:
-        return jsonify({"ok": False, "error": "not_authenticated"}), 401
-
-    data = request.get_json(silent=True) or {}
-    game = data.get("game")
-    score = data.get("score")
-
-    if game not in ("minesweeper", "2048"):
-        return jsonify({"ok": False, "error": "unknown_game"}), 400
-    try:
-        score = int(score)
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "bad_score"}), 400
-
-    models.save_score(int(current_user.id), game, score)
-    best = models.get_user_best(int(current_user.id), game)
-    return jsonify({"ok": True, "best": best})
-
-
-@app.route("/leaderboard/<game>")
-def leaderboard(game):
-    if game not in ("minesweeper", "2048"):
+@app.route("/game/<int:game_id>")
+def game_detail(game_id):
+    game = Game.query.get(game_id)
+    if not game:
         abort(404)
-    rows = models.get_leaderboard(game, limit=20)
-    return render_template("leaderboard.html", game=game, rows=rows)
+
+    reviews = game.reviews.order_by(desc(Review.id)).all()
+    is_fav = False
+    if current_user.is_authenticated:
+        u = User.query.get(int(current_user.id))
+        is_fav = u.favorites.filter(Game.id == game.id).count() > 0
+
+    return render_template(
+        "game.html",
+        game=game.to_dict(),
+        reviews=[r.to_dict() for r in reviews],
+        is_fav=is_fav,
+    )
 
 
-# ---------- Регистрация / Вход ----------
+# ---------- Отзывы ----------
+@app.route("/game/<int:game_id>/review", methods=["POST"])
+@login_required
+def add_review(game_id):
+    game = Game.query.get(game_id)
+    if not game:
+        abort(404)
+
+    try:
+        rating = int(request.form.get("rating", 0))
+    except ValueError:
+        rating = 0
+
+    text = request.form.get("text", "").strip()
+
+    if rating < 1 or rating > 10:
+        flash("Оценка должна быть от 1 до 10", "error")
+        return redirect(url_for("game_detail", game_id=game_id))
+
+    # Один отзыв от одного пользователя (заменим старый)
+    existing = Review.query.filter_by(game_id=game_id, user_id=int(current_user.id)).first()
+    if existing:
+        existing.rating = rating
+        existing.text = text
+        flash("Отзыв обновлён", "success")
+    else:
+        review = Review(
+            game_id=game_id,
+            user_id=int(current_user.id),
+            username=current_user.username,
+            rating=rating,
+            text=text,
+        )
+        db.session.add(review)
+        flash("Отзыв добавлен", "success")
+
+    db.session.commit()
+    return redirect(url_for("game_detail", game_id=game_id))
+
+
+# ---------- Избранное ----------
+@app.route("/favorites")
+@login_required
+def favorites():
+    u = User.query.get(int(current_user.id))
+    games = u.favorites.order_by(desc(Game.id)).all()
+    return render_template("favorites.html", games=[g.to_dict() for g in games])
+
+
+@app.route("/game/<int:game_id>/favorite", methods=["POST"])
+@login_required
+def toggle_favorite(game_id):
+    game = Game.query.get(game_id)
+    if not game:
+        abort(404)
+
+    u = User.query.get(int(current_user.id))
+    if u.favorites.filter(Game.id == game_id).count() > 0:
+        u.favorites.remove(game)
+        flash("Удалено из избранного", "success")
+    else:
+        u.favorites.append(game)
+        flash("Добавлено в избранное", "success")
+
+    db.session.commit()
+    return redirect(url_for("game_detail", game_id=game_id))
+
+
+# ---------- Аутентификация ----------
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if current_user.is_authenticated:
-        return redirect(url_for("index"))
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
-        password2 = request.form.get("password2", "")
 
-        if not username or not email or not password:
+        if not (username and email and password):
             flash("Заполните все поля", "error")
-        elif len(username) < 3:
-            flash("Логин — минимум 3 символа", "error")
+        elif User.query.filter_by(username=username).first():
+            flash("Логин уже занят", "error")
+        elif User.query.filter_by(email=email).first():
+            flash("Email уже занят", "error")
         elif len(password) < 6:
-            flash("Пароль — минимум 6 символов", "error")
-        elif password != password2:
-            flash("Пароли не совпадают", "error")
-        elif models.user_exists(username, email):
-            flash("Логин или email уже заняты", "error")
+            flash("Пароль должен быть минимум 6 символов", "error")
         else:
-            is_admin = 1 if models.count_users() == 0 else 0
-            models.create_user(username, email,
-                               generate_password_hash(password),
-                               is_admin=is_admin)
-            flash("Регистрация успешна! Теперь войдите.", "success")
+            u = User(
+                username=username,
+                email=email,
+                password_hash=generate_password_hash(password),
+                is_admin=False,
+            )
+            db.session.add(u)
+            db.session.commit()
+            flash("Регистрация успешна! Войдите.", "success")
             return redirect(url_for("login"))
+
     return render_template("register.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if current_user.is_authenticated:
-        return redirect(url_for("index"))
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        row = models.get_user_by_username(username)
-        if row and check_password_hash(row["password_hash"], password):
-            login_user(User(row))
-            flash(f"Добро пожаловать, {row['username']}!", "success")
-            return redirect(request.args.get("next") or url_for("index"))
+
+        u = User.query.filter_by(username=username).first()
+        if u and check_password_hash(u.password_hash, password):
+            login_user(CurrentUser(u))
+            flash("Вы вошли", "success")
+            return redirect(url_for("index"))
+
         flash("Неверный логин или пароль", "error")
+
     return render_template("login.html")
 
 
@@ -177,109 +244,126 @@ def login():
 @login_required
 def logout():
     logout_user()
-    flash("Вы вышли из аккаунта", "success")
+    flash("Вы вышли", "success")
     return redirect(url_for("index"))
 
 
-# ---------- Профиль / Настройки ----------
-@app.route("/profile/<username>")
-def profile(username):
-    row = models.get_user_by_username(username)
-    if row is None:
-        abort(404)
-    return render_template("profile.html", user=row)
-
-
-@app.route("/settings", methods=["GET", "POST"])
-@login_required
-def settings():
+# ---------- Админка ----------
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    """Быстрый вход в админку по паролю (создаёт/использует пользователя admin)."""
     if request.method == "POST":
-        form_type = request.form.get("form_type")
-        if form_type == "profile":
-            models.update_user(
-                int(current_user.id),
-                email=request.form.get("email", "").strip(),
-                bio=request.form.get("bio", "").strip(),
-            )
-            flash("Профиль обновлён", "success")
-        elif form_type == "password":
-            old = request.form.get("old_password", "")
-            new = request.form.get("new_password", "")
-            new2 = request.form.get("new_password2", "")
-            row = models.get_user_by_id(int(current_user.id))
-            if not check_password_hash(row["password_hash"], old):
-                flash("Старый пароль неверный", "error")
-            elif len(new) < 6:
-                flash("Новый пароль — минимум 6 символов", "error")
-            elif new != new2:
-                flash("Пароли не совпадают", "error")
-            else:
-                models.update_user(int(current_user.id),
-                                   password_hash=generate_password_hash(new))
-                flash("Пароль изменён", "success")
-        return redirect(url_for("settings"))
-    row = models.get_user_by_id(int(current_user.id))
-    return render_template("settings.html", user=row)
+        if request.form.get("password") == ADMIN_PASSWORD:
+            admin = User.query.filter_by(username="admin").first()
+            if not admin:
+                admin = User(
+                    username="admin",
+                    email="admin@site.local",
+                    password_hash=generate_password_hash(secrets.token_hex(16)),
+                    is_admin=True,
+                )
+                db.session.add(admin)
+                db.session.commit()
+            login_user(CurrentUser(admin))
+            return redirect(url_for("admin"))
+        flash("Неверный пароль", "error")
+
+    return render_template("admin_login.html")
 
 
-# ---------- Контакты ----------
+@app.route("/admin")
+@login_required
+@admin_required
+def admin():
+    games = Game.query.order_by(desc(Game.id)).all()
+    messages = Message.query.order_by(desc(Message.id)).all()
+    return render_template(
+        "admin.html",
+        games=[g.to_dict() for g in games],
+        messages=[m.to_dict() for m in messages],
+    )
+
+
+@app.route("/admin/add", methods=["GET", "POST"])
+@login_required
+@admin_required
+def add_game():
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        genre = request.form.get("genre", "").strip()
+        platform = request.form.get("platform", "").strip()
+        year_raw = request.form.get("year", "").strip()
+        link = request.form.get("link", "").strip()
+
+        if not (title and description and genre and platform):
+            flash("Заполните обязательные поля", "error")
+            return redirect(url_for("add_game"))
+
+        year = None
+        if year_raw:
+            try:
+                year = int(year_raw)
+            except ValueError:
+                pass
+
+        # Загрузка картинки
+        image_filename = None
+        file = request.files.get("image")
+        if file and file.filename and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            import time
+            filename = f"{int(time.time())}_{filename}"
+            file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+            image_filename = filename
+
+        game = Game(
+            title=title,
+            description=description,
+            genre=genre,
+            platform=platform,
+            year=year,
+            link=link or None,
+            image=image_filename,
+        )
+        db.session.add(game)
+        db.session.commit()
+        flash("Игра добавлена", "success")
+        return redirect(url_for("admin"))
+
+    return render_template("add_game.html")
+
+
+@app.route("/admin/delete/<int:game_id>", methods=["POST"])
+@login_required
+@admin_required
+def delete_game(game_id):
+    game = Game.query.get(game_id)
+    if game:
+        db.session.delete(game)
+        db.session.commit()
+        flash("Игра удалена", "success")
+    return redirect(url_for("admin"))
+
+
+# ---------- Обратная связь ----------
 @app.route("/contact", methods=["GET", "POST"])
 def contact():
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip()
         text = request.form.get("text", "").strip()
+
         if not (name and email and text):
             flash("Заполните все поля", "error")
         else:
-            models.create_message(name, email, text)
+            msg = Message(name=name, email=email, text=text)
+            db.session.add(msg)
+            db.session.commit()
             flash("Спасибо! Сообщение отправлено.", "success")
             return redirect(url_for("contact"))
+
     return render_template("contact.html")
-
-
-# ---------- Админка ----------
-@app.route("/admin")
-@admin_required
-def admin():
-    users = models.get_all_users()
-    messages = models.get_all_messages()
-    return render_template("admin.html", users=users, messages=messages)
-
-
-@app.route("/admin/user/<int:user_id>/toggle_admin", methods=["POST"])
-@admin_required
-def toggle_admin(user_id):
-    row = models.get_user_by_id(user_id)
-    if row:
-        models.update_user(user_id, is_admin=not bool(row["is_admin"]))
-        flash(f"Права {row['username']} изменены", "success")
-    return redirect(url_for("admin"))
-
-
-@app.route("/admin/user/<int:user_id>/delete", methods=["POST"])
-@admin_required
-def delete_user(user_id):
-    if user_id == int(current_user.id):
-        flash("Нельзя удалить самого себя", "error")
-    else:
-        models.delete_user(user_id)
-        flash("Пользователь удалён", "success")
-    return redirect(url_for("admin"))
-
-
-@app.route("/admin/message/<int:message_id>/delete", methods=["POST"])
-@admin_required
-def delete_message(message_id):
-    models.delete_message(message_id)
-    flash("Сообщение удалено", "success")
-    return redirect(url_for("admin"))
-
-
-# ---------- Ошибки ----------
-@app.errorhandler(403)
-def forbidden(e):
-    return render_template("403.html"), 403
 
 
 @app.errorhandler(404)
@@ -287,14 +371,10 @@ def not_found(e):
     return render_template("404.html"), 404
 
 
-@app.errorhandler(500)
-def server_error(e):
-    return render_template("500.html"), 500
+# ---------- Инициализация БД ----------
+with app.app_context():
+    db.create_all()
 
-
-models.init_db()
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=DEBUG)

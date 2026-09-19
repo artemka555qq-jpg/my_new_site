@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Добавить игру{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Добавить игру</h1>
+
+<form method="post" enctype="multipart/form-data" style="max-width: 700px;">
+    <div class="mb-3">
+        <label class="form-label">Название *</label>
+        <input type="text" name="title" class="form-control" required>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Описание *</label>
+        <textarea name="description" rows="4" class="form-control" required></textarea>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Жанр *</label>
+            <input type="text" name="genre" class="form-control" list="genres" required>
+            <datalist id="genres">
+                <option value="Экшен">
+                <option value="RPG">
+                <option value="Стратегия">
+                <option value="Головоломка">
+                <option value="Спорт">
+                <option value="Гонки">
+                <option value="Симулятор">
+            </datalist>
+        </div>
+        <div class="col-md-6 mb-3">
+            <label class="form-label">Платформа *</label>
+            <input type="text" name="platform" class="form-control" list="platforms" required>
+            <datalist id="platforms">
+                <option value="PC">
+                <option value="PS5">
+                <option value="Xbox">
+                <option value="Mobile">
+                <option value="Switch">
+            </datalist>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Год выпуска</label>
+            <input type="number" name="year" min="1970" max="2100" class="form-control">
+        </div>
+        <div class="col-md-8 mb-3">
+            <label class="form-label">Ссылка (Steam / YouTube / сайт)</label>
+            <input type="url" name="link" class="form-control" placeholder="https://...">
+        </div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Обложка</label>
+        <input type="file" name="image" accept="image/*" class="form-control">
+        <div class="form-text">PNG, JPG, GIF, WEBP, до 5 МБ</div>
+    </div>
+    <button class="btn btn-success">Добавить</button>
+    <a href="{{ url_for('admin') }}" class="btn btn-secondary">Назад</a>
+</form>
+{% endblock %}
