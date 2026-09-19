@@ -1,31 +1,44 @@
 {% extends "base.html" %}
-{% block title %}Избранное{% endblock %}
+{% block title %}Избранное — PlayWatch{% endblock %}
 
 {% block content %}
-<h1 class="mb-4">⭐ Моё избранное</h1>
+
+<h1>⭐ Моё избранное</h1>
 
 {% if games %}
     <div class="row">
         {% for game in games %}
-            <div class="col-md-4 col-sm-6 mb-4">
-                <div class="card h-100 game-card">
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="game-card">
                     {% if game.image %}
                         <img src="{{ url_for('static', filename='uploads/' + game.image) }}"
-                             class="card-img-top" style="height: 200px; object-fit: cover;">
+                             class="card-img-top" alt="{{ game.title }}">
                     {% else %}
-                        <div class="card-img-top bg-secondary d-flex align-items-center justify-content-center"
-                             style="height: 200px; color: white; font-size: 3rem;">🎮</div>
+                        <div class="placeholder-img">🎮</div>
                     {% endif %}
                     <div class="card-body">
-                        <h5>{{ game.title }}</h5>
-                        <p class="text-muted small">{{ game.genre }} • {{ game.platform }}</p>
-                        <a href="{{ url_for('game_detail', game_id=game.id) }}" class="btn btn-primary btn-sm">Открыть</a>
+                        <h5 class="card-title">{{ game.title }}</h5>
+                        <div class="game-meta">
+                            <span class="badge-genre">{{ game.genre }}</span>
+                            <span class="badge-platform">{{ game.platform }}</span>
+                        </div>
+                        {% if game.avg_rating %}
+                            <span class="badge-rating">⭐ {{ game.avg_rating }} / 10</span>
+                        {% endif %}
+                        <a href="{{ url_for('game_detail', game_id=game.id) }}"
+                           class="btn btn-primary btn-sm w-100 mt-3">Открыть</a>
                     </div>
                 </div>
             </div>
         {% endfor %}
     </div>
 {% else %}
-    <p class="text-muted">В избранном пусто. Добавляйте игры со страницы игры.</p>
+    <div class="empty-state">
+        <div class="empty-state-icon">⭐</div>
+        <h3>В избранном пусто</h3>
+        <p>Добавляйте игры со страницы игры</p>
+        <a href="{{ url_for('index') }}" class="btn btn-primary mt-3">В каталог</a>
+    </div>
 {% endif %}
+
 {% endblock %}

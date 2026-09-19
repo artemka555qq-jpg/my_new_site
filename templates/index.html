@@ -1,12 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Каталог игр{% endblock %}
+{% block title %}Каталог игр — PlayWatch{% endblock %}
 
 {% block content %}
-<h1 class="mb-4">Каталог игр</h1>
+
+<div class="text-center mb-5">
+    <h1>Игры, которые стоят внимания</h1>
+    <p class="text-muted fs-5">Находи. Оценивай. Играй.</p>
+</div>
 
 <form class="row g-2 mb-4" method="get">
-    <div class="col-md-4">
-        <input type="text" name="q" class="form-control" placeholder="Поиск по названию" value="{{ q }}">
+    <div class="col-md-5">
+        <input type="text" name="q" class="form-control"
+               placeholder="🔍 Поиск по названию..." value="{{ q }}">
     </div>
     <div class="col-md-3">
         <select name="genre" class="form-select">
@@ -16,7 +21,7 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
         <select name="platform" class="form-select">
             <option value="">Все платформы</option>
             {% for p in platforms %}
@@ -25,42 +30,58 @@
         </select>
     </div>
     <div class="col-md-2">
-        <button class="btn btn-primary w-100">Найти</button>
+        <button class="btn btn-primary w-100" style="padding: 0.7rem;">Найти</button>
     </div>
 </form>
 
 {% if games %}
     <div class="row">
         {% for game in games %}
-            <div class="col-md-4 col-sm-6 mb-4">
-                <div class="card h-100 game-card">
+            <div class="col-lg-4 col-md-6 mb-4">
+                <div class="game-card">
                     {% if game.image %}
                         <img src="{{ url_for('static', filename='uploads/' + game.image) }}"
-                             class="card-img-top" style="height: 200px; object-fit: cover;">
+                             class="card-img-top" alt="{{ game.title }}">
                     {% else %}
-                        <div class="card-img-top bg-secondary d-flex align-items-center justify-content-center"
-                             style="height: 200px; color: white; font-size: 3rem;">🎮</div>
+                        <div class="placeholder-img">🎮</div>
                     {% endif %}
-                    <div class="card-body d-flex flex-column">
+                    <div class="card-body">
                         <h5 class="card-title">{{ game.title }}</h5>
-                        <p class="card-text text-muted small mb-2">
-                            {{ game.genre }} • {{ game.platform }}{% if game.year %} • {{ game.year }}{% endif %}
+
+                        <div class="game-meta">
+                            <span class="badge-genre">{{ game.genre }}</span>
+                            <span class="badge-platform">{{ game.platform }}</span>
+                            {% if game.year %}
+                                <span class="badge-year">{{ game.year }}</span>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            {% if game.avg_rating %}
+                                <span class="badge-rating">⭐ {{ game.avg_rating }} / 10</span>
+                                <span class="text-muted small ms-2">{{ game.reviews_count }} отзывов</span>
+                            {% else %}
+                                <span class="badge-rating no-rating">Нет оценок</span>
+                            {% endif %}
+                        </div>
+
+                        <p class="card-text text-muted small" style="flex-grow: 1;">
+                            {{ game.description[:120] }}{% if game.description|length > 120 %}...{% endif %}
                         </p>
-                        {% if game.avg_rating %}
-                            <p class="mb-2">⭐ <strong>{{ game.avg_rating }}</strong> / 10
-                                <span class="text-muted small">({{ game.reviews_count }})</span></p>
-                        {% else %}
-                            <p class="text-muted small mb-2">Нет оценок</p>
-                        {% endif %}
-                        <p class="card-text">{{ game.description[:100] }}{% if game.description|length > 100 %}...{% endif %}</p>
+
                         <a href="{{ url_for('game_detail', game_id=game.id) }}"
-                           class="btn btn-primary btn-sm mt-auto">Подробнее</a>
+                           class="btn btn-primary btn-sm w-100 mt-2">Подробнее →</a>
                     </div>
                 </div>
             </div>
         {% endfor %}
     </div>
 {% else %}
-    <p class="text-muted">Игр не найдено.</p>
+    <div class="empty-state">
+        <div class="empty-state-icon">🎮</div>
+        <h3>Игр пока нет</h3>
+        <p>Загляните позже — мы добавляем новое каждый день</p>
+    </div>
 {% endif %}
+
 {% endblock %}
